@@ -1,121 +1,254 @@
 package app.redmiboostx
 
+import android.app.ActivityManager
+import android.app.AppOpsManager
+import android.content.Context
 import android.content.Intent
+import android.net.TrafficStats
+import android.os.BatteryManager
 import android.os.Bundle
+import android.os.Environment
+import android.os.StatFs
+import android.os.Process
+import android.app.usage.UsageStatsManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import java.util.concurrent.TimeUnit
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    BoostHome(
-                        openDisplay = { openSystemSetting(Settings.ACTION_DISPLAY_SETTINGS) },
-                        openBattery = { openSystemSetting(Settings.ACTION_BATTERY_SAVER_SETTINGS) },
-                        openSettings = { openSystemSetting(Settings.ACTION_SETTINGS) }
-                    )
-                }
+                BoostDashboard(
+                    context = this,
+                    startOverlay = { startFloatingPanel() },
+                    openOverlayPermission = {
+                        startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+                    },
+                    openUsagePermission = {
+                        startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    },
+                    openDisplay = { openSetting(Settings.ACTION_DISPLAY_SETTINGS) },
+                    openBattery = { openSetting(Settings.ACTION_BATTERY_SAVER_SETTINGS) }
+                )
             }
         }
     }
 
-    private fun openSystemSetting(action: String) {
+    private fun startFloatingPanel() {
+        if (!Settings.canDrawOverlays(this)) {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+            return
+        }
+        val intent = Intent(this, FloatingPanelService::class.java)
+        startService(intent)
+    }
+
+    private fun openSetting(action: String) {
         runCatching { startActivity(Intent(action)) }
             .onFailure { startActivity(Intent(Settings.ACTION_SETTINGS)) }
     }
 }
 
+private data class DeviceStats(
+    val download: String,
+    val upload: String,
+    val ramFree: String,
+    val ramTotal: String,
+    val storageFree: String,
+    val storageTotal: String,
+    val battery: String,
+    val batteryTemp: String
+)
+
+private fun bytesPerSecond(value: Long): String {
+    if (value < 0) return "No disponible"
+    val kb = value / 1024.0
+    return if (kb >= 1024) String.format(Locale.getDefault(), "%.2f MB/s", kb / 1024.0)
+    else String.format(Locale.getDefault(), "%.0f KB/s", kb)
+}
+
+private fun readDeviceStats(context: Context, down: Long, up: Long): DeviceStats {
+    val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+    val memory = ActivityManager.MemoryInfo()
+    activityManager.getMemoryInfo(memory)
+
+    val stat = StatFs(Environment.getDataDirectory().absolutePath)
+    val free = stat.availableBytes
+    val total = stat.totalBytes
+
+    val batteryIntent = context.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+    val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+    val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+    val percent = if (level >= 0 && scale > 0) "${(level * 100) / scale}%" else "No disponible"
+    val tenths = batteryIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+    val temp = if (tenths >= 0) String.format(Locale.getDefault(), "%.1f °C", tenths / 10f) else "No disponible"
+
+    return DeviceStats(
+        download = bytesPerSecond(down),
+        upload = bytesPerSecond(up),
+        ramFree = formatBytes(memory.availMem),
+        ramTotal = formatBytes(memory.totalMem),
+        storageFree = formatBytes(free),
+        storageTotal = formatBytes(total),
+        battery = percent,
+        batteryTemp = temp
+    )
+}
+
+private fun formatBytes(bytes: Long): String {
+    val gb = bytes / (1024.0 * 1024.0 * 1024.0)
+    return if (gb >= 1) String.format(Locale.getDefault(), "%.2f GB", gb)
+    else String.format(Locale.getDefault(), "%.0f MB", bytes / (1024.0 * 1024.0))
+}
+
+private fun hasUsageAccess(context: Context): Boolean {
+    val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+    val mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName)
+    return mode == AppOpsManager.MODE_ALLOWED
+}
+
+private fun recentApps(context: Context): List<String> {
+    if (!hasUsageAccess(context)) return emptyList()
+    val manager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+    val now = System.currentTimeMillis()
+    val stats = manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - TimeUnit.DAYS.toMillis(1), now)
+        ?: return emptyList()
+    return stats.asSequence()
+        .filter { it.packageName != context.packageName && it.lastTimeUsed > 0L }
+        .sortedByDescending { it.lastTimeUsed }
+        .distinctBy { it.packageName }
+        .take(8)
+        .mapNotNull {
+            runCatching {
+                val app = context.packageManager.getApplicationInfo(it.packageName, 0)
+                context.packageManager.getApplicationLabel(app).toString()
+            }.getOrNull()
+        }.toList()
+}
+
 @Composable
-private fun BoostHome(
+private fun BoostDashboard(
+    context: Context,
+    startOverlay: () -> Unit,
+    openOverlayPermission: () -> Unit,
+    openUsagePermission: () -> Unit,
     openDisplay: () -> Unit,
-    openBattery: () -> Unit,
-    openSettings: () -> Unit
+    openBattery: () -> Unit
 ) {
-    var gameMode by remember { mutableStateOf(false) }
-    var tipsDone by remember { mutableStateOf(false) }
+    var stats by remember { mutableStateOf(readDeviceStats(context, 0, 0)) }
+    var recent by remember { mutableStateOf(recentApps(context)) }
+    var usageAllowed by remember { mutableStateOf(hasUsageAccess(context)) }
+    var lastRx by remember { mutableLongStateOf(TrafficStats.getTotalRxBytes()) }
+    var lastTx by remember { mutableLongStateOf(TrafficStats.getTotalTxBytes()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            val rx = TrafficStats.getTotalRxBytes()
+            val tx = TrafficStats.getTotalTxBytes()
+            val down = if (rx >= 0 && lastRx >= 0) (rx - lastRx).coerceAtLeast(0) else -1
+            val up = if (tx >= 0 && lastTx >= 0) (tx - lastTx).coerceAtLeast(0) else -1
+            lastRx = rx
+            lastTx = tx
+            stats = readDeviceStats(context, down, up)
+            usageAllowed = hasUsageAccess(context)
+            if (usageAllowed) recent = recentApps(context)
+        }
+    }
 
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text("REDMI BOOST X", style = MaterialTheme.typography.headlineMedium)
-        Text("Asistente de rendimiento • Redmi A5", style = MaterialTheme.typography.bodyMedium)
+        Text("Panel de rendimiento • Redmi A5 • Android 15")
 
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Preparación para jugar", style = MaterialTheme.typography.titleLarge)
-                Text("Configurá tu teléfono antes de abrir Free Fire. Este perfil es una guía: Android mantiene el control del hardware.")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Modo juego", modifier = Modifier.weight(1f))
-                    Switch(checked = gameMode, onCheckedChange = { gameMode = it })
+        Card {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Internet en tiempo real", style = MaterialTheme.typography.titleLarge)
+                MetricRow("Descarga", stats.download)
+                MetricRow("Subida", stats.upload)
+                Text("Medición del tráfico total del teléfono; no es un test de velocidad ni mide exclusivamente Free Fire.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
+        Card {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Estado del teléfono", style = MaterialTheme.typography.titleLarge)
+                MetricRow("RAM disponible", stats.ramFree)
+                MetricRow("RAM total", stats.ramTotal)
+                MetricRow("Almacenamiento libre", stats.storageFree)
+                MetricRow("Almacenamiento total", stats.storageTotal)
+                MetricRow("Batería", stats.battery)
+                MetricRow("Temperatura de batería", stats.batteryTemp)
+            }
+        }
+
+        Card {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Panel flotante para jugar", style = MaterialTheme.typography.titleLarge)
+                Text("Muestra descarga, subida y RAM encima de Free Fire. Requiere que autorices «Mostrar sobre otras apps» y mantener activa la notificación del servicio.")
+                Button(onClick = startOverlay, modifier = Modifier.fillMaxWidth()) {
+                    Text("Iniciar panel flotante")
                 }
-                Text(if (gameMode) "Perfil activado en la app. Aplicá también los ajustes recomendados de abajo." else "Activá el perfil para ver la lista de preparación.")
-            }
-        }
-
-        Card {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Checklist rápido", style = MaterialTheme.typography.titleMedium)
-                Text("• Cerrá manualmente las apps que no estés usando.")
-                Text("• Desactivá la grabación de pantalla si no la necesitás.")
-                Text("• Usá una conexión estable y evitá descargas en segundo plano.")
-                Text("• Si el teléfono se calienta mucho, pausá y dejalo enfriar.")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Ya revisé estos puntos", modifier = Modifier.weight(1f))
-                    Switch(checked = tipsDone, onCheckedChange = { tipsDone = it })
+                OutlinedButton(onClick = openOverlayPermission, modifier = Modifier.fillMaxWidth()) {
+                    Text("Permiso de ventanas flotantes")
                 }
             }
         }
 
-        Text("Ajustes del sistema", style = MaterialTheme.typography.titleLarge)
-        OutlinedButton(onClick = openDisplay, modifier = Modifier.fillMaxWidth()) {
-            Text("Abrir ajustes de pantalla")
-        }
-        OutlinedButton(onClick = openBattery, modifier = Modifier.fillMaxWidth()) {
-            Text("Abrir ajustes de batería")
-        }
-        Button(onClick = openSettings, modifier = Modifier.fillMaxWidth()) {
-            Text("Abrir ajustes de Android")
+        Card {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Aplicaciones usadas recientemente", style = MaterialTheme.typography.titleLarge)
+                Text("Android no permite a una app común ver libremente todos los procesos activos. Esta lista muestra apps usadas recientemente, no confirma cuáles siguen ejecutándose en segundo plano.")
+                if (!usageAllowed) {
+                    Text("Necesitás habilitar Acceso a uso para mostrar la lista.")
+                    OutlinedButton(onClick = openUsagePermission, modifier = Modifier.fillMaxWidth()) {
+                        Text("Habilitar acceso a uso")
+                    }
+                } else if (recent.isEmpty()) {
+                    Text("Todavía no hay datos de uso disponibles.")
+                } else {
+                    recent.forEach { Text("• $it") }
+                }
+            }
         }
 
         Card {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("¿RAM en la nube?", style = MaterialTheme.typography.titleMedium)
-                Text("No puede funcionar como RAM física para Free Fire: los datos tardan demasiado en viajar por internet. La memoria del juego debe estar disponible en el propio teléfono.")
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Accesos rápidos", style = MaterialTheme.typography.titleLarge)
+                OutlinedButton(onClick = openDisplay, modifier = Modifier.fillMaxWidth()) { Text("Ajustes de pantalla") }
+                OutlinedButton(onClick = openBattery, modifier = Modifier.fillMaxWidth()) { Text("Ajustes de batería") }
             }
         }
+
         Card {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Transparencia", style = MaterialTheme.typography.titleMedium)
-                Text("REDMI BOOST X no inventa mediciones de FPS o temperatura. Tampoco fuerza CPU/GPU, modifica el sistema, usa root ni promete FPS imposibles. Los resultados dependen del juego, Android, temperatura y hardware.")
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("WhatsApp sin salir del juego", style = MaterialTheme.typography.titleMedium)
+                Text("Para responder mientras jugás, activá las notificaciones emergentes de WhatsApp y usá «Responder» desde la propia notificación. La disponibilidad depende de WhatsApp y de los ajustes del Redmi. REDMI BOOST X no lee tus mensajes.")
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text("REDMI BOOST X 1.0.0", style = MaterialTheme.typography.labelSmall)
+
+        Text("REDMI BOOST X 2.0 • Sin root • Sin modificar ni desconectar tu VPN", style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun MetricRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label)
+        Text(value, style = MaterialTheme.typography.bodyLarge)
     }
 }
