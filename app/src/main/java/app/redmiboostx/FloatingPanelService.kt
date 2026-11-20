@@ -165,7 +165,8 @@ class FloatingPanelService : Service() {
         }
         params = layoutParams
 
-        root.setOnTouchListener(object : View.OnTouchListener {
+        // Drag only from the title bar so the collapse and close buttons remain tappable.
+        header.setOnTouchListener(object : View.OnTouchListener {
             private var startX = 0
             private var startY = 0
             private var touchX = 0f
@@ -182,9 +183,10 @@ class FloatingPanelService : Service() {
                     MotionEvent.ACTION_MOVE -> {
                         layoutParams.x = (startX + touchX - event.rawX).toInt()
                         layoutParams.y = (startY + event.rawY - touchY).toInt()
-                        runCatching { windowManager.updateViewLayout(view, layoutParams) }
+                        runCatching { windowManager.updateViewLayout(root, layoutParams) }
                         return true
                     }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> return true
                 }
                 return false
             }
