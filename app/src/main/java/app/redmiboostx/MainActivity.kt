@@ -1,6 +1,7 @@
 package app.redmiboostx
 
 import android.app.ActivityManager
+import android.media.AudioManager
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
@@ -41,7 +42,12 @@ class MainActivity : ComponentActivity() {
                     },
                     openDisplay = { openSetting(Settings.ACTION_DISPLAY_SETTINGS) },
                     openBattery = { openSetting(Settings.ACTION_BATTERY_SAVER_SETTINGS) },
-                    openWhatsAppNotifications = { openWhatsAppNotificationSettings() }
+                    openWhatsAppNotifications = { openWhatsAppNotificationSettings() },
+                    applyGameProfile = { applyGameProfile() },
+                    restoreGameProfile = { restoreGameProfile() },
+                    requestWriteSettings = { requestWriteSettings() },
+                    launchFreeFire = { launchFreeFire() },
+                    canModifySettings = { Settings.System.canWrite(this) }
                 )
             }
         }
@@ -58,6 +64,54 @@ class MainActivity : ComponentActivity() {
         } else {
             startService(intent)
         }
+    }
+
+
+    private fun requestWriteSettings() {
+        startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS).apply {
+            data = android.net.Uri.parse("package:$packageName")
+        })
+    }
+
+    private fun applyGameProfile() {
+        if (!Settings.System.canWrite(this)) { requestWriteSettings(); return }
+        val prefs = getSharedPreferences("game_profile", MODE_PRIVATE)
+        if (!prefs.getBoolean("saved", false)) {
+            val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+            prefs.edit()
+                .putInt("brightness", Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128))
+                .putInt("brightness_mode", Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC))
+                .putInt("timeout", Settings.System.getInt(contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, 60000))
+                .putInt("volume", audio.getStreamVolume(AudioManager.STREAM_MUSIC))
+                .putBoolean("saved", true).apply()
+        }
+        runCatching {
+            Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+            Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, 204)
+            Settings.System.putInt(contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, 30 * 60 * 1000)
+            val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, (audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC) * 0.70f).toInt().coerceAtLeast(1), 0)
+        }
+    }
+
+    private fun restoreGameProfile() {
+        if (!Settings.System.canWrite(this)) { requestWriteSettings(); return }
+        val prefs = getSharedPreferences("game_profile", MODE_PRIVATE)
+        if (!prefs.getBoolean("saved", false)) return
+        runCatching {
+            Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, prefs.getInt("brightness_mode", Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC))
+            Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, prefs.getInt("brightness", 128))
+            Settings.System.putInt(contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, prefs.getInt("timeout", 60000))
+            val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, prefs.getInt("volume", audio.getStreamVolume(AudioManager.STREAM_MUSIC)), 0)
+        }
+        prefs.edit().putBoolean("saved", false).apply()
+    }
+
+    private fun launchFreeFire() {
+        val launch = listOf("com.dts.freefireth", "com.dts.freefiremax")
+            .firstNotNullOfOrNull { packageManager.getLaunchIntentForPackage(it) }
+        if (launch != null) startActivity(launch) else startActivity(Intent(Settings.ACTION_SETTINGS))
     }
 
     private fun openWhatsAppNotificationSettings() {
@@ -159,7 +213,12 @@ private fun BoostDashboard(
     openUsagePermission: () -> Unit,
     openDisplay: () -> Unit,
     openBattery: () -> Unit,
-    openWhatsAppNotifications: () -> Unit
+    openWhatsAppNotifications: () -> Unit,
+    applyGameProfile: () -> Unit,
+    restoreGameProfile: () -> Unit,
+    requestWriteSettings: () -> Unit,
+    launchFreeFire: () -> Unit,
+    canModifySettings: () -> Boolean
 ) {
     var stats by remember { mutableStateOf(readDeviceStats(context, 0, 0)) }
     var recent by remember { mutableStateOf(recentApps(context)) }
@@ -188,6 +247,22 @@ private fun BoostDashboard(
     ) {
         Text("REDMI BOOST X", style = MaterialTheme.typography.headlineMedium)
         Text("Panel de rendimiento • Redmi A5 • Android 15")
+
+
+        Card {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Modo juego — ajustes reales", style = MaterialTheme.typography.titleLarge)
+                Text("Brillo manual al 80%, pantalla activa hasta 30 minutos y volumen multimedia al 70%. Guarda tus valores anteriores para restaurarlos.")
+                if (!canModifySettings()) {
+                    Button(onClick = requestWriteSettings, modifier = Modifier.fillMaxWidth()) { Text("Autorizar cambios de ajustes") }
+                } else {
+                    Button(onClick = applyGameProfile, modifier = Modifier.fillMaxWidth()) { Text("Activar modo juego") }
+                    OutlinedButton(onClick = restoreGameProfile, modifier = Modifier.fillMaxWidth()) { Text("Restaurar mis ajustes anteriores") }
+                }
+                OutlinedButton(onClick = launchFreeFire, modifier = Modifier.fillMaxWidth()) { Text("Abrir Free Fire") }
+                Text("Ajusta pantalla y audio; no promete más FPS ni cambia CPU/GPU. No modifica la VPN.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
 
         Card {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
