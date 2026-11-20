@@ -145,6 +145,28 @@ class FloatingPanelService : Service() {
         }
         root.addView(details)
 
+        // Quick actions available above games without leaving the overlay.
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 8, 0, 0)
+        }
+        fun actionButton(label: String, onClick: () -> Unit) {
+            val button = Button(this).apply {
+                text = label
+                isAllCaps = false
+                textSize = 11f
+                setOnClickListener { onClick() }
+            }
+            actions.addView(button, LinearLayout.LayoutParams(0, 44, 1f).apply {
+                setMargins(3, 0, 3, 0)
+            })
+        }
+        actionButton("WhatsApp") { launchApp("com.whatsapp") }
+        actionButton("Free Fire") { launchGame() }
+        actionButton("Ajustes") { openSystemSettings() }
+        root.addView(actions)
+
         @Suppress("DEPRECATION")
         val windowType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -198,6 +220,33 @@ class FloatingPanelService : Service() {
                 panel = null
                 stopSelf()
             }
+    }
+
+    private fun launchApp(packageName: String) {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+        if (launchIntent != null) {
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { startActivity(launchIntent) }
+        } else {
+            openSystemSettings()
+        }
+    }
+
+    private fun launchGame() {
+        val packages = listOf("com.dts.freefireth", "com.dts.freefiremax")
+        val launchIntent = packages.firstNotNullOfOrNull { packageManager.getLaunchIntentForPackage(it) }
+        if (launchIntent != null) {
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { startActivity(launchIntent) }
+        } else {
+            openSystemSettings()
+        }
+    }
+
+    private fun openSystemSettings() {
+        runCatching {
+            startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
     }
 
     private fun updateMetrics() {
