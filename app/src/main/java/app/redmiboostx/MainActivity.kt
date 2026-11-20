@@ -223,6 +223,7 @@ private fun BoostDashboard(
     var stats by remember { mutableStateOf(readDeviceStats(context, 0, 0)) }
     var recent by remember { mutableStateOf(recentApps(context)) }
     var usageAllowed by remember { mutableStateOf(hasUsageAccess(context)) }
+    var writeAllowed by remember { mutableStateOf(canModifySettings()) }
     var lastRx by remember { mutableLongStateOf(TrafficStats.getTotalRxBytes()) }
     var lastTx by remember { mutableLongStateOf(TrafficStats.getTotalTxBytes()) }
 
@@ -237,6 +238,7 @@ private fun BoostDashboard(
             lastTx = tx
             stats = readDeviceStats(context, down, up)
             usageAllowed = hasUsageAccess(context)
+            writeAllowed = canModifySettings()
             if (usageAllowed) recent = recentApps(context)
         }
     }
@@ -253,7 +255,7 @@ private fun BoostDashboard(
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Modo juego — ajustes reales", style = MaterialTheme.typography.titleLarge)
                 Text("Brillo manual al 80%, pantalla activa hasta 30 minutos y volumen multimedia al 70%. Guarda tus valores anteriores para restaurarlos.")
-                if (!canModifySettings()) {
+                if (!writeAllowed) {
                     Button(onClick = requestWriteSettings, modifier = Modifier.fillMaxWidth()) { Text("Autorizar cambios de ajustes") }
                 } else {
                     Button(onClick = applyGameProfile, modifier = Modifier.fillMaxWidth()) { Text("Activar modo juego") }
