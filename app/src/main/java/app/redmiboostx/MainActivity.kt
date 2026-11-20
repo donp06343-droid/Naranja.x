@@ -40,7 +40,8 @@ class MainActivity : ComponentActivity() {
                         startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
                     },
                     openDisplay = { openSetting(Settings.ACTION_DISPLAY_SETTINGS) },
-                    openBattery = { openSetting(Settings.ACTION_BATTERY_SAVER_SETTINGS) }
+                    openBattery = { openSetting(Settings.ACTION_BATTERY_SAVER_SETTINGS) },
+                    openWhatsAppNotifications = { openWhatsAppNotificationSettings() }
                 )
             }
         }
@@ -52,7 +53,19 @@ class MainActivity : ComponentActivity() {
             return
         }
         val intent = Intent(this, FloatingPanelService::class.java)
-        startService(intent)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    private fun openWhatsAppNotificationSettings() {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, "com.whatsapp")
+        }
+        runCatching { startActivity(intent) }
+            .onFailure { startActivity(Intent(Settings.ACTION_SETTINGS)) }
     }
 
     private fun openSetting(action: String) {
@@ -145,7 +158,8 @@ private fun BoostDashboard(
     openOverlayPermission: () -> Unit,
     openUsagePermission: () -> Unit,
     openDisplay: () -> Unit,
-    openBattery: () -> Unit
+    openBattery: () -> Unit,
+    openWhatsAppNotifications: () -> Unit
 ) {
     var stats by remember { mutableStateOf(readDeviceStats(context, 0, 0)) }
     var recent by remember { mutableStateOf(recentApps(context)) }
@@ -237,7 +251,10 @@ private fun BoostDashboard(
         Card {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("WhatsApp sin salir del juego", style = MaterialTheme.typography.titleMedium)
-                Text("Para responder mientras jugás, activá las notificaciones emergentes de WhatsApp y usá «Responder» desde la propia notificación. La disponibilidad depende de WhatsApp y de los ajustes del Redmi. REDMI BOOST X no lee tus mensajes.")
+                Text("Activá las notificaciones de WhatsApp y, si el sistema lo permite, respondé desde la notificación sin cerrar el juego. REDMI BOOST X no lee tus mensajes.")
+                OutlinedButton(onClick = openWhatsAppNotifications, modifier = Modifier.fillMaxWidth()) {
+                    Text("Abrir ajustes de notificaciones de WhatsApp")
+                }
             }
         }
 
