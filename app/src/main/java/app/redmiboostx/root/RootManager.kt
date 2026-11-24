@@ -3,8 +3,8 @@ package app.redmiboostx.root
 import com.topjohnwu.superuser.Shell
 
 /**
- * Small, read-first wrapper around libsu.
- * This phase exposes command execution and a narrowly allow-listed no-op sysfs probe only.
+ * Read-first wrapper around libsu. The only write exposed in this phase is a
+ * narrowly allow-listed read-then-write of the exact current sysfs value.
  */
 object RootManager {
     data class CommandResult(
@@ -38,8 +38,8 @@ object RootManager {
     }.getOrDefault(false)
 
     /**
-     * Performs a read-then-write of the exact current value.
-     * Only known governor/frequency attributes are accepted.
+     * Verifies actual SELinux/sysfs access by writing the exact current value
+     * back to a small allow-list of tunable attributes. Arbitrary paths reject.
      */
     fun isWritable(path: String): WriteProbeResult {
         val allowedPath = path.matches(
@@ -59,15 +59,11 @@ object RootManager {
         }.getOrDefault("unknown")
 
         val script = """
-            target='$path'
-            [ -e "$target" ] || { echo "MISSING"; exit 20; }
-            current=$(cat "$target" 2>/dev/null) || { echo "READ_DENIED"; exit 21; }
-            case "$current" in
-                *"
-            "*) echo "MULTILINE_VALUE"; exit 22 ;;
-            esac
-            [ -n "$current" ] || { echo "EMPTY_VALUE"; exit 23; }
-            printf '%s' "$current" > "$target" 2>/dev/null || { echo "WRITE_DENIED"; exit 24; }
+            target='${path}'
+            [ -e "${'$'}target" ] || { echo "MISSING"; exit 20; }
+            current=${'$'}(cat "${'$'}target" 2>/dev/null) || { echo "READ_DENIED"; exit 21; }
+            [ -n "${'$'}current" ] || { echo "EMPTY_VALUE"; exit 22; }
+            printf '%s' "${'$'}current" > "${'$'}target" 2>/dev/null || { echo "WRITE_DENIED"; exit 23; }
             echo "NO_OP_WRITE_OK"
         """.trimIndent()
 
@@ -78,7 +74,7 @@ object RootManager {
                 ok -> "Lectura y escritura no-op verificadas."
                 result.stdout.isNotBlank() -> result.stdout
                 result.stderr.isNotBlank() -> result.stderr
-                else -> "La prueba no pudo completarse (código \${result.exitCode})."
+                else -> "La prueba no pudo completarse (código ${result.exitCode})."
             }
             WriteProbeResult(path, ok, selinux, message)
         }.getOrElse { error ->
