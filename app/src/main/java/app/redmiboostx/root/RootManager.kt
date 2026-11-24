@@ -21,7 +21,7 @@ object RootManager {
         val message: String
     )
 
-    fun execute(command: String): CommandResult {
+    internal fun execute(command: String): CommandResult {
         require(command.isNotBlank()) { "El comando no puede estar vacío." }
         val result = Shell.cmd(command).exec()
         return CommandResult(
@@ -32,10 +32,10 @@ object RootManager {
         )
     }
 
-    fun isRootAvailable(): Boolean = runCatching {
+    fun isRootAvailable(): Boolean {
         val result = execute("id -u")
-        result.success && result.stdout.trim() == "0"
-    }.getOrDefault(false)
+        return result.success && result.stdout.trim() == "0"
+    }
 
     /**
      * Verifies actual SELinux/sysfs access by writing the exact current value
