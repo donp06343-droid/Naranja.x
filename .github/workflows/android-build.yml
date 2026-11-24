@@ -1,7 +1,9 @@
-name: Android build
+name: Naranja Core Android build
 
 on:
   push:
+    branches: [ "main", "naranja-core-phase-0" ]
+  pull_request:
     branches: [ "main" ]
   workflow_dispatch:
 
@@ -32,6 +34,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: redmi-boost-x-debug
+          name: naranja-core-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
