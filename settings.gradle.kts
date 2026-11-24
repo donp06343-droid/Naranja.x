@@ -10,7 +10,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven("https://jitpack.io")
     }
 }
-rootProject.name = "RedmiBoostX"
+rootProject.name = "Naranja Core"
 include(":app")

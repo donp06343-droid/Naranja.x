@@ -22,7 +22,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import app.redmiboostx.device.CapabilityDetector
+import app.redmiboostx.device.DeviceCapabilities
+import app.redmiboostx.ui.screens.DiagnosticsScreen
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 import java.util.Locale
 
@@ -30,25 +34,52 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            var showDiagnostics by remember { mutableStateOf(false) }
+            var diagnosticData by remember { mutableStateOf<DeviceCapabilities?>(null) }
+            var diagnosticLoading by remember { mutableStateOf(false) }
+            val diagnosticsScope = rememberCoroutineScope()
+            val refreshDiagnostics: () -> Unit = {
+                diagnosticsScope.launch {
+                    diagnosticLoading = true
+                    diagnosticData = runCatching { CapabilityDetector.detect() }.getOrNull()
+                    diagnosticLoading = false
+                }
+            }
+
             MaterialTheme {
-                BoostDashboard(
-                    context = this,
-                    startOverlay = { startFloatingPanel() },
-                    openOverlayPermission = {
-                        startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
-                    },
-                    openUsagePermission = {
-                        startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-                    },
-                    openDisplay = { openSetting(Settings.ACTION_DISPLAY_SETTINGS) },
-                    openBattery = { openSetting(Settings.ACTION_BATTERY_SAVER_SETTINGS) },
-                    openWhatsAppNotifications = { openWhatsAppNotificationSettings() },
-                    applyGameProfile = { applyGameProfile() },
-                    restoreGameProfile = { restoreGameProfile() },
-                    requestWriteSettings = { requestWriteSettings() },
-                    launchFreeFire = { launchFreeFire() },
-                    canModifySettings = { Settings.System.canWrite(this) }
-                )
+                if (showDiagnostics) {
+                    DiagnosticsScreen(
+                        capabilities = diagnosticData,
+                        isLoading = diagnosticLoading,
+                        onRefresh = { refreshDiagnostics() },
+                        onBack = { showDiagnostics = false }
+                    )
+                    LaunchedEffect(showDiagnostics) {
+                        if (showDiagnostics && diagnosticData == null && !diagnosticLoading) {
+                            refreshDiagnostics()
+                        }
+                    }
+                } else {
+                    BoostDashboard(
+                        context = this,
+                        startOverlay = { startFloatingPanel() },
+                        openOverlayPermission = {
+                            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+                        },
+                        openUsagePermission = {
+                            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                        },
+                        openDisplay = { openSetting(Settings.ACTION_DISPLAY_SETTINGS) },
+                        openBattery = { openSetting(Settings.ACTION_BATTERY_SAVER_SETTINGS) },
+                        openWhatsAppNotifications = { openWhatsAppNotificationSettings() },
+                        applyGameProfile = { applyGameProfile() },
+                        restoreGameProfile = { restoreGameProfile() },
+                        requestWriteSettings = { requestWriteSettings() },
+                        launchFreeFire = { launchFreeFire() },
+                        openDiagnostics = { showDiagnostics = true },
+                        canModifySettings = { Settings.System.canWrite(this) }
+                    )
+                }
             }
         }
     }
@@ -218,6 +249,7 @@ private fun BoostDashboard(
     restoreGameProfile: () -> Unit,
     requestWriteSettings: () -> Unit,
     launchFreeFire: () -> Unit,
+    openDiagnostics: () -> Unit,
     canModifySettings: () -> Boolean
 ) {
     var stats by remember { mutableStateOf(readDeviceStats(context, 0, 0)) }
@@ -247,8 +279,8 @@ private fun BoostDashboard(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("REDMI BOOST X", style = MaterialTheme.typography.headlineMedium)
-        Text("Panel de rendimiento • Redmi A5 • Android 15")
+        Text("Naranja Core", style = MaterialTheme.typography.headlineMedium)
+        Text("Diagnóstico y herramientas de rendimiento para Android")
 
 
         Card {
@@ -322,20 +354,21 @@ private fun BoostDashboard(
                 Text("Accesos rápidos", style = MaterialTheme.typography.titleLarge)
                 OutlinedButton(onClick = openDisplay, modifier = Modifier.fillMaxWidth()) { Text("Ajustes de pantalla") }
                 OutlinedButton(onClick = openBattery, modifier = Modifier.fillMaxWidth()) { Text("Ajustes de batería") }
+                OutlinedButton(onClick = openDiagnostics, modifier = Modifier.fillMaxWidth()) { Text("Diagnóstico Naranja Core") }
             }
         }
 
         Card {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("WhatsApp sin salir del juego", style = MaterialTheme.typography.titleMedium)
-                Text("Activá las notificaciones de WhatsApp y, si el sistema lo permite, respondé desde la notificación sin cerrar el juego. REDMI BOOST X no lee tus mensajes.")
+                Text("Activá las notificaciones de WhatsApp y, si el sistema lo permite, respondé desde la notificación sin cerrar el juego. Naranja Core no lee tus mensajes.")
                 OutlinedButton(onClick = openWhatsAppNotifications, modifier = Modifier.fillMaxWidth()) {
                     Text("Abrir ajustes de notificaciones de WhatsApp")
                 }
             }
         }
 
-        Text("REDMI BOOST X 2.0 • Sin root • Sin modificar ni desconectar tu VPN", style = MaterialTheme.typography.labelSmall)
+        Text("Naranja Core • Root opcional para diagnóstico • No modifica ni desconecta tu VPN", style = MaterialTheme.typography.labelSmall)
     }
 }
 
