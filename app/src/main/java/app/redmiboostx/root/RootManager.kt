@@ -34,7 +34,10 @@ object RootManager {
 
     fun isRootAvailable(): Boolean {
         val result = execute("id -u")
-        return result.success && result.stdout.trim() == "0"
+        if (!result.success) {
+            throw IllegalStateException(result.stderr.ifBlank { "No se pudo consultar UID root." })
+        }
+        return result.stdout.trim() == "0"
     }
 
     /**
@@ -44,7 +47,7 @@ object RootManager {
     fun isWritable(path: String): WriteProbeResult {
         val allowedPath = path.matches(
             Regex(
-                "^/sys/(class/devfreq/[A-Za-z0-9_.-]+/governor|" +
+                "^/sys/(class/devfreq/[A-Za-z0-9_.,:-]+/governor|" +
                     "devices/system/cpu/cpu[0-9]+/cpufreq/" +
                     "(scaling_governor|scaling_min_freq|scaling_max_freq))$"
             )
