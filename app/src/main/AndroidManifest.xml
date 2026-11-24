@@ -20,7 +20,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="REDMI BOOST X"
+        android:label="Naranja Core"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:supportsRtl="true">
 
